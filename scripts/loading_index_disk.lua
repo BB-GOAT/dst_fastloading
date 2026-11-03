@@ -1,5 +1,5 @@
 -- Windows 宽字符文件接口；只枚举文件名，不加载或执行被枚举的脚本。
--- 保护调用仅用于释放文件和枚举句柄，清理后重新抛出异常。
+-- 保护调用仅用于释放枚举句柄，清理后重新抛出异常。
 return function(G, options)
     options = options or {}
     local ffi = G.require("ffi")
@@ -15,10 +15,6 @@ return function(G, options)
         "int __stdcall FindNextFileW(void *, void *);",
         "int __stdcall FindClose(void *);",
         "uint32_t __stdcall GetLastError(void);",
-        "void * __stdcall CreateFileW(const void *, uint32_t, uint32_t, void *, uint32_t, uint32_t, void *);",
-        "int __stdcall GetFileSizeEx(void *, void *);",
-        "int __stdcall ReadFile(void *, void *, uint32_t, void *, void *);",
-        "int __stdcall CloseHandle(void *);",
     }
     if not G.rawget(G, "DST_LOADING_INDEX_FFI_DECLARED") then
         for _, declaration in ipairs(declarations) do ffi.cdef(declaration) end
@@ -198,23 +194,6 @@ return function(G, options)
     function api:Exists(path)
         local value = attributes(path)
         return value and bit.band(value, 16) == 0 or false
-    end
-    function api:ReadSource(path)
-        local handle = K.CreateFileW(nativepath(path), 2147483648, 7, nil, 3, 128, nil)
-        if handle == INVALID then return nil, tonumber(K.GetLastError()) end
-        local ok, result, code = pcall(function()
-            local size = ffi.new("int64_t[1]")
-            if K.GetFileSizeEx(handle, size) == 0 then return nil, tonumber(K.GetLastError()) end
-            local length = tonumber(size[0])
-            if length < 0 or length > 67108864 then return nil, "script_size_limit" end
-            local buffer, read = ffi.new("uint8_t[?]", math.max(1, length)), ffi.new("uint32_t[1]")
-            if K.ReadFile(handle, buffer, length, read, nil) == 0 then return nil, tonumber(K.GetLastError()) end
-            if read[0] ~= length then return nil, "short_read" end
-            return ffi.string(buffer, length)
-        end)
-        K.CloseHandle(handle)
-        if not ok then error(result, 0) end
-        return result, code
     end
     return api
 end

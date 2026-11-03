@@ -50,6 +50,14 @@ return function(G, enabled)
         for _, key in G.ipairs({ "GetMod", "GetPostInitFns", "GetPostInitData" }) do
             if type(manager[key]) ~= "function" then G.error("GetMod 索引缺少接口：" .. key, 0) end
         end
+        -- 已有包装可能改变返回值或执行必要登记，不用名称索引跳过它。
+        local debug = G.debug
+        local info = debug and debug.getinfo and debug.getinfo(manager.GetMod, "S")
+        local source = info and info.source:gsub("\\", "/"):gsub("^@", "")
+        if source ~= "scripts/mods.lua" then
+            self.reason = "无法确认 GetMod 为原版入口，保留已有实现"
+            return
+        end
         hook("GetMod", function(previous)
             return function(self, name, ...)
                 if state.applied and not state.restored and self == manager and scope > 0 then
