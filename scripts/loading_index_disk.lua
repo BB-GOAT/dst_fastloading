@@ -15,15 +15,10 @@ return function(G, options)
         "int __stdcall FindNextFileW(void *, void *);",
         "int __stdcall FindClose(void *);",
         "uint32_t __stdcall GetLastError(void);",
-        "int __stdcall CreateDirectoryW(const void *, void *);",
         "void * __stdcall CreateFileW(const void *, uint32_t, uint32_t, void *, uint32_t, uint32_t, void *);",
         "int __stdcall GetFileSizeEx(void *, void *);",
         "int __stdcall ReadFile(void *, void *, uint32_t, void *, void *);",
-        "int __stdcall WriteFile(void *, const void *, uint32_t, void *, void *);",
         "int __stdcall CloseHandle(void *);",
-        "int __stdcall MoveFileExW(const void *, const void *, uint32_t);",
-        "int __stdcall DeleteFileW(const void *);",
-        "uint32_t __stdcall GetCurrentProcessId(void);",
     }
     if not G.rawget(G, "DST_LOADING_INDEX_FFI_DECLARED") then
         for _, declaration in ipairs(declarations) do ffi.cdef(declaration) end
@@ -59,7 +54,13 @@ return function(G, options)
         return utf8(buffer, n):gsub("\\", "/"):gsub("/+$", "")
     end
     local function nativepath(path)
-        local full = api:FullPath(path):gsub("/", "\\")
+        -- 内部已规范化的盘符绝对路径无需再次分配完整路径缓冲区。
+        local full = path
+        if not path:match("^%a:/") or path:find("\\", 1, true)
+            or path:find("/.", 1, true) or path:find("//", 1, true) then
+            full = api:FullPath(path)
+        end
+        full = full:gsub("/", "\\")
         if full:sub(1, 2) == "\\\\" then return wide("\\\\?\\UNC\\" .. full:sub(3)) end
         return wide("\\\\?\\" .. full)
     end
@@ -72,12 +73,6 @@ return function(G, options)
         local value, code = attributes(path)
         if not value then return false, code end
         return bit.band(value, 16) ~= 0
-    end
-    local function mkdir(path)
-        if isdir(path) then return true end
-        local parent = path:match("^(.*)/[^/]+$")
-        if parent and #parent > 2 and not mkdir(parent) then return false end
-        return K.CreateDirectoryW(nativepath(path), nil) ~= 0 or isdir(path)
     end
     local function executable()
         local buffer = ffi.new("uint16_t[32768]")
@@ -92,9 +87,6 @@ return function(G, options)
         game_root = exe:match("^(.*)/bin64/[^/]+$")
     end
     game_root = api:FullPath(game_root)
-    local cache_dir = assert(options.cache_dir, "cache_dir required")
-    api.cache_dir = api:FullPath(cache_dir)
-    if not mkdir(api.cache_dir) then error("cache directory unavailable") end
 
     -- 优先实际 mods 目录，其次 Steam 工坊目录；一个清单对应一个明确的物理根。
     function api:Roots(name, logicalroot)
@@ -138,7 +130,6 @@ return function(G, options)
     function api:Scan(roots)
         local files, visited = {}, 0
         local function walk(directory, prefix, depth)
-            if self:FullPath(directory):lower() == self.cache_dir:lower() then return true end
             if depth > 128 then return false, "depth_limit" end
             local attr = attributes(directory)
             if not attr or bit.band(attr, 16) == 0 then return false, "directory_disappeared" end
@@ -183,43 +174,26 @@ return function(G, options)
         end
         return files
     end
+    -- 原版 io 将 unsafedata 映射到玩家存档目录，与模组安装位置无关。
     local function cachepath(name)
         assert(name == "index", "invalid cache name")
-        return api.cache_dir .. "/index.json"
+        return "unsafedata/dst_fastloading_file_index.json"
     end
     function api:Read(name)
-        local handle = K.CreateFileW(nativepath(cachepath(name)), 2147483648, 7, nil, 3, 128, nil)
-        if handle == INVALID then return nil end
-        local ok, result = pcall(function()
-            local size = ffi.new("int64_t[1]")
-            if K.GetFileSizeEx(handle, size) == 0 then return nil end
-            local length = tonumber(size[0])
-            if length < 1 or length > 67108864 then return nil end
-            local buffer, read = ffi.new("uint8_t[?]", length), ffi.new("uint32_t[1]")
-            if K.ReadFile(handle, buffer, length, read, nil) == 0 or read[0] ~= length then return nil end
-            return ffi.string(buffer, length)
-        end)
-        K.CloseHandle(handle)
-        if not ok then error(result, 0) end
-        return result
+        local file = G.io.open(cachepath(name), "r")
+        if not file then return nil end
+        local text = file:read(67108865)
+        local closed = file:close()
+        if not closed or not text or #text == 0 or #text > 67108864 then return nil end
+        return text
     end
     function api:Write(name, text)
-        local path = cachepath(name)
-        local temporary = path .. "." .. tonumber(K.GetCurrentProcessId()) .. ".tmp"
-        local handle = K.CreateFileW(nativepath(temporary), 1073741824, 0, nil, 2, 128, nil)
-        if handle == INVALID then return false end
-        local ok, success = pcall(function()
-            local written = ffi.new("uint32_t[1]")
-            return K.WriteFile(handle, text, #text, written, nil) ~= 0 and written[0] == #text
-        end)
-        K.CloseHandle(handle)
-        if ok and success and K.MoveFileExW(nativepath(temporary), nativepath(path), 9) ~= 0 then return true end
-        K.DeleteFileW(nativepath(temporary))
-        if not ok then error(success, 0) end
-        return false
-    end
-    function api:Delete(name)
-        return K.DeleteFileW(nativepath(cachepath(name))) ~= 0
+        local file, reason = G.io.open(cachepath(name), "w")
+        if not file then return false, reason end
+        local written, write_error = file:write(text)
+        local closed, close_error = file:close()
+        if not written or not closed then return false, write_error or close_error end
+        return true
     end
     function api:Exists(path)
         local value = attributes(path)

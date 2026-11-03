@@ -49,33 +49,53 @@ return function(G, options, supplied_disk, supplied_json)
         list[#list + 1] = { entry = entry, relative = relative }
     end
     local function prepare()
-        disk = supplied_disk or G.require("loading_index_disk")(G, { cache_dir = options.modroot .. "file_index" })
+        disk = supplied_disk or G.require("loading_index_disk")(G)
         json = supplied_json or G.require("json")
-        local cache = { schema = 2, mods = {} }
+        local cache = { schema = 3, mods = {} }
+        local dirty = true
         if not options.rebuild then
             local text = disk:Read("index")
             if text then
-                local value = json.decode(text)
-                if type(value) == "table" and value.schema == 2 and type(value.mods) == "table" then cache = value end
+                local ok, value = G.pcall(json.decode, text)
+                if ok and type(value) == "table" and value.schema == 3 and type(value.mods) == "table" then
+                    cache, dirty = value, false
+                else
+                    G.print("[快速加载] 文件清单损坏或格式已更新，重新扫描。")
+                end
             end
         end
-        local dirty = options.rebuild == true
-        -- 清理旧清单，包括本轮未启用的模组；保留其余记录，无需全量重新扫描。
-        for _, stored in pairs(cache.mods) do
-            if type(stored) == "table" and type(stored.files) == "table" then
-                local filtered, removed = {}, false
-                for _, relative in ipairs(stored.files) do
-                    if type(relative) == "string" and dotpath(relative:gsub("\\", "/")) then
-                        removed = true
-                    else
-                        filtered[#filtered + 1] = relative
-                    end
-                end
-                if removed then
-                    stored.files, stored.count = filtered, #filtered
-                    dirty = true
-                end
+        local function prepare_mod(name, mod)
+            local version = mod.modinfo and mod.modinfo.version
+            -- 无版本的本地目录每轮重新枚举，不把未知版本长期缓存。
+            local reusable = type(version) == "string" and version ~= ""
+            if not reusable then version = "" end
+            local roots, why = disk:Roots(name, G.MODS_ROOT .. name .. "/")
+            if not roots then return false, why end
+            local root = roots[1]
+            local stored = cache.mods[name]
+            local list
+            if reusable and not options.rebuild and type(stored) == "table"
+                and stored.version == version and stored.root == root and type(stored.files) == "table" then
+                local valid = true
+                for _, relative in ipairs(stored.files) do if not keypath(relative) then valid = false; break end end
+                if valid and #stored.files == stored.count then list = stored.files end
             end
+            if not list then
+                local files, reason = disk:Scan(roots)
+                if not files then return false, reason end
+                list = {}
+                for relative in pairs(files) do list[#list + 1] = relative end
+                table.sort(list)
+                cache.mods[name] = { version = version, root = root, files = list, count = #list }
+                dirty = true
+            end
+            local entry = { name = name, root = root, files = {} }
+            entries[name] = entry
+            roots_by_path[normalize(G.MODS_ROOT .. name)] = entry
+            roots_by_path[normalize(disk:FullPath(G.MODS_ROOT .. name))] = entry
+            roots_by_path[normalize(root)] = entry
+            for _, relative in ipairs(list) do index_file(entry, relative) end
+            return true
         end
         local seen = {}
         for _, mod in ipairs(G.ModManager.mods) do
@@ -83,42 +103,20 @@ return function(G, options, supplied_disk, supplied_json)
             local workshop = type(name) == "string" and name:match("^workshop%-%d+$")
             if type(name) == "string" and not seen[name] and (workshop or options.local_mods) then
                 seen[name] = true
-                local version = mod.modinfo and mod.modinfo.version
-                -- 无版本的本地目录每轮重新枚举，不把未知版本长期缓存。
-                local reusable = type(version) == "string" and version ~= ""
-                if not reusable then version = "" end
-                local roots, why = disk:Roots(name, G.MODS_ROOT .. name .. "/")
-                if not roots then G.error("无法索引模组 " .. name .. "：" .. tostring(why), 0) end
-                local root = roots[1]
-                local stored = cache.mods[name]
-                local list
-                if reusable and not options.rebuild and type(stored) == "table"
-                    and stored.version == version and stored.root == root and type(stored.files) == "table" then
-                    local valid = true
-                    for _, relative in ipairs(stored.files) do if not keypath(relative) then valid = false; break end end
-                    if valid and #stored.files == stored.count then list = stored.files end
+                local success, reason = prepare_mod(name, mod)
+                if not success then
+                    G.print("[快速加载] 模组 " .. name .. " 保留原版搜索：" .. tostring(reason))
                 end
-                if not list then
-                    local files, error = disk:Scan(roots)
-                    if not files then G.error("无法扫描模组 " .. name .. "：" .. tostring(error), 0) end
-                    list = {}
-                    for relative in pairs(files) do list[#list + 1] = relative end
-                    table.sort(list)
-                    cache.mods[name] = { version = version, root = root, files = list, count = #list }
-                    dirty = true
-                end
-                local entry = { name = name, root = root, files = {} }
-                entries[name] = entry
-                roots_by_path[normalize(G.MODS_ROOT .. name)] = entry
-                roots_by_path[normalize(disk:FullPath(G.MODS_ROOT .. name))] = entry
-                roots_by_path[normalize(root)] = entry
-                for _, relative in ipairs(list) do index_file(entry, relative) end
             end
         end
         if dirty then
-            if not disk:Write("index", json.encode(cache)) then G.error("无法保存模组文件清单。", 0) end
+            local success, reason = disk:Write("index", json.encode(cache))
+            if not success then
+                G.print("[快速加载] 无法保存文件清单，继续使用当轮内存索引：" .. tostring(reason))
+            end
         end
     end
+
     local function script_paths()
         local path = G.package.path
         if script_plan and script_plan.source == path then return script_plan end
@@ -405,7 +403,6 @@ return function(G, options, supplied_disk, supplied_json)
             return function(...) asset_plan = nil; return previous(...) end
         end)
     end
-    function state:RefreshPaths() script_plan, asset_plan = nil, nil end
     function state:Restore()
         if self.restored then return end
         self.active, self.restored = false, true
