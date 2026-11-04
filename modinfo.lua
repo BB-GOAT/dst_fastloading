@@ -1,10 +1,24 @@
+---@diagnostic disable: lowercase-global
 name = "快速加载"
-version = "1.0.0"
+version = "1.0.1"
 author = "冰冰羊"
-description = "提前建立模组文件磁盘索引，无模组提供者时直接尝试索引游戏本体，仍未找到才使用原版完整搜索。需要 Windows LuaJIT 才能使用"
+description = [[
+提前建立资源/脚本文件磁盘索引，使游戏获取文件时直接从索引找到对应目标以提升加载速度
+开的模组越多加快越明显
+需要 Windows LuaJIT 才能使用
+]]
 api_version = 10
-priority = 1e50 -- 晚于提供 FFI 的 LuaJIT 模组，早于普通内容模组。
-dst_compatible = true
+priority = 1e50
+
+dst_compatible = true -- 兼容联机版
+forge_compatible = true -- 兼容熔炉
+gorge_compatible = true -- 兼容暴食
+dont_starve_compatible = false -- 不兼容单机版
+
+luajit_compatible = { -- Luajit兼容性标识 https://steamcommunity.com/sharedfiles/filedetails/?id=3444078585 | https://github.com/fesily/DontStarveLuaJIT2
+    dep_tailcall = false -- 表示不依赖堆栈深度
+}
+
 all_clients_require_mod = false
 client_only_mod = true
 server_only_mod = false
@@ -13,7 +27,7 @@ configuration_options = {
     {
         name = "file_index_enabled",
         label = "文件搜索索引",
-        hover = "通过文件索引加速模组和游戏本体的脚本、资源搜索。",
+        hover = "通过文件索引加速模组和游戏本体的脚本、资源搜索",
         options = {
             { description = "开启", data = true },
             { description = "关闭", data = false },
@@ -23,7 +37,7 @@ configuration_options = {
     {
         name = "index_local_mods",
         label = "索引本地模组",
-        hover = "将本地模组也纳入文件索引，按版本号复用清单；手动新增文件后可选择重建。",
+        hover = "将本地模组也纳入文件索引，按版本号复用清单；手动新增文件后可选择重建",
         options = {
             { description = "关闭（仅工坊）", data = false },
             { description = "开启（工坊和本地）", data = true },
@@ -33,7 +47,7 @@ configuration_options = {
     {
         name = "rebuild_file_index",
         label = "强制重建文件索引",
-        hover = "开启后每次加载均重新扫描。手动新增模组文件后可用，完成重建后请关回。",
+        hover = "开启后每次加载均重新扫描。手动新增模组文件后可用，完成重建后请关回",
         options = {
             { description = "关闭（复用同版本）", data = false },
             { description = "开启（重新扫描）", data = true },
@@ -43,7 +57,7 @@ configuration_options = {
     {
         name = "getmod_index",
         label = "GetMod名称索引",
-        hover = "独立于文件索引，只加速PostInit收集期间的模组查询。",
+        hover = "独立于文件索引，只加速PostInit收集期间的模组查询",
         options = {
             { description = "开启", data = true },
             { description = "关闭", data = false },

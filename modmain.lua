@@ -1,5 +1,9 @@
 local G = GLOBAL
 G.setmetatable(env, { __index = function(_, key) return G.rawget(G, key) end })
+
+local ffi_ok, ffi = G.pcall(G.require, "ffi")
+if not ffi_ok or not ffi or ffi.os ~= "Windows" then G.print("[快速加载] 需要 Windows LuaJIT 的 FFI 支持，已跳过加载") return end
+
 if G.rawget(G, "DST_LOADING_INDEX") then return end
 
 local getmod = G.require("loading_index_getmod")(G, GetModConfigData("getmod_index") == true)

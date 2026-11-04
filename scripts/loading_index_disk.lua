@@ -3,7 +3,6 @@
 return function(G, options)
     options = options or {}
     local ffi = G.require("ffi")
-    if ffi.os ~= "Windows" then error("Windows LuaJIT required") end
     local declarations = {
         [[typedef struct { uint32_t attr; uint32_t times[6]; uint32_t sizehigh, sizelow, reserved[2]; uint16_t name[260]; uint16_t alternate[14]; } DST_LOADING_INDEX_FIND_DATA_V1;]],
         "int __stdcall MultiByteToWideChar(unsigned int, uint32_t, const char *, int, void *, int);",
