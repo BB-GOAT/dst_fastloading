@@ -54,7 +54,7 @@ return function(G, options, supplied_disk, supplied_json)
         list[#list + 1] = { entry = entry, relative = relative }
     end
     local function prepare()
-        disk = supplied_disk or G.require("loading_index_disk")(G)
+        disk = supplied_disk or options.disk_factory(G)
         json = supplied_json or G.require("json")
         local cache = { schema = 3, mods = {} }
         local dirty = true

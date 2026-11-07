@@ -1,16 +1,30 @@
 local G = GLOBAL
 G.setmetatable(env, { __index = function(_, key) return G.rawget(G, key) end })
 
+-- 快速穿越世界
+if GetModConfigData("fast_migration") then
+    modimport("main/migration_runtime.lua")
+end
+
+local function Import(modulename, file_env)
+    local f = G.kleiloadlua(modulename)
+    if f and type(f) == "function" then
+        G.setfenv(f, file_env or env)
+        return f()
+    end
+end
+
 local ffi_ok, ffi = G.pcall(G.require, "ffi")
-if not ffi_ok or not ffi or ffi.os ~= "Windows" then G.print("[快速加载] 需要 Windows LuaJIT 的 FFI 支持，已跳过加载") return end
+if not ffi_ok or not ffi or ffi.os ~= "Windows" then G.print("[快速加载] 文件索引需要 Windows LuaJIT 的 FFI 支持，已跳过索引加载") return end
 
 if G.rawget(G, "DST_LOADING_INDEX") then return end
 
-local getmod = G.require("loading_index_getmod")(G, GetModConfigData("getmod_index") == true)
-local index = G.require("loading_index")(G, {
+local getmod = Import(MODROOT .. "main/loading_index_getmod.lua", GLOBAL)(G, GetModConfigData("getmod_index") == true)
+local index = Import(MODROOT .. "main/loading_index.lua", GLOBAL)(G, {
     enabled = GetModConfigData("file_index_enabled") == true,
     local_mods = GetModConfigData("index_local_mods") == true,
     rebuild = GetModConfigData("rebuild_file_index") == true,
+    disk_factory = Import(MODROOT .. "main/loading_index_disk.lua", GLOBAL),
 })
 
 local old_end = G.KnownModIndex.EndStartupSequence

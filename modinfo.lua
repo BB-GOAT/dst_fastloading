@@ -1,11 +1,12 @@
 ---@diagnostic disable: lowercase-global
 name = "快速加载"
-version = "1.0.1"
+version = "1.1.0"
 author = "冰冰羊"
 description = [[
 提前建立资源/脚本文件磁盘索引，使游戏获取文件时直接从索引找到对应目标以提升加载速度
 开的模组越多加快越明显
-需要 Windows LuaJIT 才能使用
+文件索引功能需要 Windows LuaJIT
+快速穿越世界可减少进出洞穴等跨世界切换时的等待，无需 LuaJIT
 ]]
 api_version = 10
 priority = 1e50
@@ -24,6 +25,16 @@ client_only_mod = true
 server_only_mod = false
 
 configuration_options = {
+    {
+        name = "fast_migration",
+        label = "快速穿越世界",
+        hover = "减少跨世界的等待时间，原版会重建一次LUA虚拟机才连接目标世界，本功能将跳过该步骤",
+        options = {
+            { description = "开启", data = true },
+            { description = "关闭", data = false },
+        },
+        default = true,
+    },
     {
         name = "file_index_enabled",
         label = "文件搜索索引",
