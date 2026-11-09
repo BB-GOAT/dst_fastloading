@@ -2,13 +2,6 @@ local G = GLOBAL
 
 -- modmain 早于 gamelogic 加载，等世界初始化后再安装原版迁移入口
 AddSimPostInit(function()
-    local marker = "DST_FASTLOADING_MIGRATION"
-    -- 兼容仍启用的独立测试版，避免重复包装同一组迁移入口。
-    local legacy_marker = "NEW_TEST_MOD_FAST_MIGRATION"
-    if G.rawget(G, marker) or G.rawget(G, legacy_marker) then
-        return
-    end
-
     local required = {
         "MigrateToServer", "StartNextInstance", "SimReset", "LoadMapFile",
         "SerializeUserSession", "OnNetworkDisconnect", "IsMigrating",
@@ -23,9 +16,6 @@ AddSimPostInit(function()
 
     local ConnectingToGamePopup = require "screens/redux/connectingtogamepopup"
     local active
-    local api = {}
-    G.rawset(G, marker, api)
-    G.rawset(G, legacy_marker, api)
 
     local old_migrate = G.MigrateToServer
     local old_reset = G.SimReset
@@ -41,11 +31,6 @@ AddSimPostInit(function()
             event, context and context.phase or "idle", elapsed))
     end
 
-    function api.GetStatus()
-        return active and active.phase or "idle",
-            active and G.GetTimeRealSeconds() - active.begin_time or 0
-    end
-
     local function IsWaiting(context)
         return context.phase == "pending" or context.phase == "connecting"
     end
@@ -54,7 +39,7 @@ AddSimPostInit(function()
         if active ~= context or context.phase == "exiting" or context.phase == "resetting" then
             return
         end
-        -- 退出仍保留上下文，防止断线回调将旧玩家保存进目标会话。
+        -- 退出仍保留上下文，防止断线回调将旧玩家保存进目标会话
         context.phase = "exiting"
         Log(reason, context)
         G.TheNet:JoinServerResponse(true)
@@ -67,7 +52,7 @@ AddSimPostInit(function()
             return
         end
         Log(reason, context)
-        -- 走原版错误弹窗；包装入口会强制确认后完整重建退出。
+        -- 走原版错误弹窗；包装入口会强制确认后完整重建退出
         G.OnNetworkDisconnect("ID_DST_USER_CONNECTION_FAILED", true, false)
     end
 
@@ -75,7 +60,7 @@ AddSimPostInit(function()
         if active ~= context or context.phase ~= "pending" or context.in_migrate then
             return
         end
-        -- StartClient 可同步触发界面更新和断线回调，先改变状态防止重入。
+        -- StartClient 可同步触发界面更新和断线回调，先改变状态防止重入
         context.phase = "connecting"
         Log("start_client", context)
         local params = context.join_params
@@ -92,24 +77,24 @@ AddSimPostInit(function()
         context.phase = "pending"
         Log("skip_join_reset", context)
 
-        -- 原版 MigrateToServer 已先保存本地小地图；从此禁止旧玩家重复保存。
+        -- 原版 MigrateToServer 已先保存本地小地图；从此禁止旧玩家重复保存
         G.DeactivateWorld()
         G.ChatHistory:JoinServer()
 
         local frontend = G.TheFrontEnd
         local popup = ConnectingToGamePopup()
-        -- 原版背景 alpha 为 0.75，旧世界保留期间需完全遮住场景。
+        -- 原版背景 alpha 为 0.75，旧世界保留期间需完全遮住场景
         popup.black:SetTint(0, 0, 0, 1)
         context.popup = popup
         local old_update = popup.OnUpdate
         local old_destroy = popup.OnDestroy
 
         popup.OnUpdate = function(self, dt, ...)
-            -- PushScreen 内会同步 Update(0)，必须等原迁移调用栈退出后的正常帧。
+            -- PushScreen 内会同步 Update(0)，必须等原迁移调用栈退出后的正常帧
             if dt > 0 and not context.in_migrate then
                 BeginConnection(context)
             end
-            -- 同步连接失败可能已经销毁本弹窗，不再更新其中的 UI 实体。
+            -- 同步连接失败可能已经销毁本弹窗，不再更新其中的 UI 实体
             if context.popup ~= self or not self.inst:IsValid() or G.SimTearingDown then
                 return
             end
@@ -121,13 +106,13 @@ AddSimPostInit(function()
         end
         popup.OnDestroy = function(self, ...)
             context.popup = nil
-            -- 原版断线处理会先弹出本窗口，再显示错误；销毁窗口不代表结束迁移。
+            -- 原版断线处理会先弹出本窗口，再显示错误；销毁窗口不代表结束迁移
             return old_destroy(self, ...)
         end
 
-        -- PushScreen 会更新淡出状态，先清除旧动画回调，避免它在这里意外执行。
+        -- PushScreen 会更新淡出状态，先清除旧动画回调，避免它在这里意外执行
         frontend:Fade(G.FADE_IN, 0)
-        -- 先切换焦点，再隐藏旧 HUD；保留对象给玩家的正常移除流程清理。
+        -- 先切换焦点，再隐藏旧 HUD；保留对象给玩家的正常移除流程清理
         frontend:PushScreen(popup)
         local hud = context.player and context.player.HUD
         if hud and hud.inst:IsValid() then
@@ -166,7 +151,7 @@ AddSimPostInit(function()
         end
         context.phase = "failed"
         Log("network_disconnect", context)
-        -- 旧世界已停用，should_reset=false 只关弹窗会遗留无法操作的旧 HUD。
+        -- 旧世界已停用，should_reset=false 只关弹窗会遗留无法操作的旧 HUD
         return old_disconnect(message, true, force_immediate_reset, ...)
     end
 
@@ -177,7 +162,7 @@ AddSimPostInit(function()
                 context.phase = "exiting"
                 Log("restart_without_old_save", context)
             end
-            -- 原版强制断线会 DoRestart(true)，迁移时保留调用链但不再次保存旧世界。
+            -- 原版强制断线会 DoRestart(true)，迁移时保留调用链但不再次保存旧世界
             return old_restart(false, ...)
         end
         return old_restart(save, ...)
@@ -211,7 +196,7 @@ AddSimPostInit(function()
     end
 
     local function FinishMigrateCall(context, ...)
-        -- 此后立刻返回原生调用者，让引擎完成迁移状态写入。
+        -- 此后立刻返回原生调用者，让引擎完成迁移状态写入
         context.in_migrate = false
         if active == context and not context.armed then
             active = nil
@@ -222,6 +207,12 @@ AddSimPostInit(function()
 
     G.MigrateToServer = function(server_ip, server_port, server_password, server_net_id, ...)
         if active then
+            if active.armed and active.phase == "connecting" and not active.in_migrate and not G.SimTearingDown then
+                -- 回档重连时，主世界可能在下发地图前再次将玩家转回洞穴
+                active.phase = "redirecting"
+                Log("redirect_via_original_migration", active)
+                return old_migrate(server_ip, server_port, server_password, server_net_id, ...)
+            end
             Log("ignore_duplicate_migration", active)
             return
         end
@@ -240,7 +231,7 @@ AddSimPostInit(function()
         }
         active = context
         Log("migration_received", context)
-        -- 保留原版保存及 StartNextInstance 包装链，仅截断最后的 JOIN_SERVER 重建。
+        -- 保留原版保存及 StartNextInstance 包装链，仅截断最后的 JOIN_SERVER 重建
         return FinishMigrateCall(context,
             old_migrate(server_ip, server_port, server_password, server_net_id, ...))
     end
