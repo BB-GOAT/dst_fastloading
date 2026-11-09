@@ -1,4 +1,4 @@
-local G = GLOBAL
+local _G = GLOBAL
 
 -- modmain 早于 gamelogic 加载，等世界初始化后再安装原版迁移入口
 AddSimPostInit(function()
@@ -8,7 +8,7 @@ AddSimPostInit(function()
         "DeactivateWorld", "DoRestart", "GetTimeRealSeconds", "InGamePlay",
     }
     for _, name in ipairs(required) do
-        if type(G.rawget(G, name)) ~= "function" then
+        if type(_G.rawget(_G, name)) ~= "function" then
             print("[快速加载][快速穿越世界] 未安装：缺少原版入口 " .. name)
             return
         end
@@ -17,16 +17,16 @@ AddSimPostInit(function()
     local ConnectingToGamePopup = require "screens/redux/connectingtogamepopup"
     local active
 
-    local old_migrate = G.MigrateToServer
-    local old_reset = G.SimReset
-    local old_load_map = G.LoadMapFile
-    local old_serialize = G.SerializeUserSession
-    local old_disconnect = G.OnNetworkDisconnect
-    local old_is_migrating = G.IsMigrating
-    local old_restart = G.DoRestart
+    local old_migrate = _G.MigrateToServer
+    local old_reset = _G.SimReset
+    local old_load_map = _G.LoadMapFile
+    local old_serialize = _G.SerializeUserSession
+    local old_disconnect = _G.OnNetworkDisconnect
+    local old_is_migrating = _G.IsMigrating
+    local old_restart = _G.DoRestart
 
     local function Log(event, context)
-        local elapsed = context and G.GetTimeRealSeconds() - context.begin_time or 0
+        local elapsed = context and _G.GetTimeRealSeconds() - context.begin_time or 0
         print(string.format("[快速加载][快速穿越世界] %s phase=%s elapsed=%.2fs",
             event, context and context.phase or "idle", elapsed))
     end
@@ -42,9 +42,9 @@ AddSimPostInit(function()
         -- 退出仍保留上下文，防止断线回调将旧玩家保存进目标会话
         context.phase = "exiting"
         Log(reason, context)
-        G.TheNet:JoinServerResponse(true)
-        G.TheNet:Disconnect(false)
-        G.DoRestart(false)
+        _G.TheNet:JoinServerResponse(true)
+        _G.TheNet:Disconnect(false)
+        _G.DoRestart(false)
     end
 
     local function FailMigration(context, reason)
@@ -53,7 +53,7 @@ AddSimPostInit(function()
         end
         Log(reason, context)
         -- 走原版错误弹窗；包装入口会强制确认后完整重建退出
-        G.OnNetworkDisconnect("ID_DST_USER_CONNECTION_FAILED", true, false)
+        _G.OnNetworkDisconnect("ID_DST_USER_CONNECTION_FAILED", true, false)
     end
 
     local function BeginConnection(context)
@@ -64,7 +64,7 @@ AddSimPostInit(function()
         context.phase = "connecting"
         Log("start_client", context)
         local params = context.join_params
-        local worked = G.TheNet:StartClient(params.serverIp, params.serverPort,
+        local worked = _G.TheNet:StartClient(params.serverIp, params.serverPort,
             nil, params.serverPassword, params.serverNetId or "")
         if active == context and context.phase == "connecting" and not worked then
             FailMigration(context, "start_client_failed")
@@ -78,10 +78,10 @@ AddSimPostInit(function()
         Log("skip_join_reset", context)
 
         -- 原版 MigrateToServer 已先保存本地小地图；从此禁止旧玩家重复保存
-        G.DeactivateWorld()
-        G.ChatHistory:JoinServer()
+        _G.DeactivateWorld()
+        _G.ChatHistory:JoinServer()
 
-        local frontend = G.TheFrontEnd
+        local frontend = _G.TheFrontEnd
         local popup = ConnectingToGamePopup()
         -- 原版背景 alpha 为 0.75，旧世界保留期间需完全遮住场景
         popup.black:SetTint(0, 0, 0, 1)
@@ -95,7 +95,7 @@ AddSimPostInit(function()
                 BeginConnection(context)
             end
             -- 同步连接失败可能已经销毁本弹窗，不再更新其中的 UI 实体
-            if context.popup ~= self or not self.inst:IsValid() or G.SimTearingDown then
+            if context.popup ~= self or not self.inst:IsValid() or _G.SimTearingDown then
                 return
             end
             return old_update(self, dt, ...)
@@ -111,7 +111,7 @@ AddSimPostInit(function()
         end
 
         -- PushScreen 会更新淡出状态，先清除旧动画回调，避免它在这里意外执行
-        frontend:Fade(G.FADE_IN, 0)
+        frontend:Fade(_G.FADE_IN, 0)
         -- 先切换焦点，再隐藏旧 HUD；保留对象给玩家的正常移除流程清理
         frontend:PushScreen(popup)
         local hud = context.player and context.player.HUD
@@ -121,17 +121,17 @@ AddSimPostInit(function()
         end
     end
 
-    G.IsMigrating = function(...)
+    _G.IsMigrating = function(...)
         if active and active.armed then
             return true
         end
         return old_is_migrating(...)
     end
 
-    G.SerializeUserSession = function(player, ...)
+    _G.SerializeUserSession = function(player, ...)
         local context = active
         if context and context.armed and player
-            and (player == context.player or (G.TheWorld == context.world and player == G.ThePlayer)) then
+            and (player == context.player or (_G.TheWorld == context.world and player == _G.ThePlayer)) then
             if not context.logged_save_block then
                 context.logged_save_block = true
                 Log("skip_old_player_save", context)
@@ -141,12 +141,12 @@ AddSimPostInit(function()
         return old_serialize(player, ...)
     end
 
-    G.OnNetworkDisconnect = function(message, should_reset, force_immediate_reset, ...)
+    _G.OnNetworkDisconnect = function(message, should_reset, force_immediate_reset, ...)
         local context = active
         if not context or not context.armed then
             return old_disconnect(message, should_reset, force_immediate_reset, ...)
         end
-        if context.phase == "failed" or context.phase == "exiting" or G.SimTearingDown then
+        if context.phase == "failed" or context.phase == "exiting" or _G.SimTearingDown then
             return true
         end
         context.phase = "failed"
@@ -155,7 +155,7 @@ AddSimPostInit(function()
         return old_disconnect(message, true, force_immediate_reset, ...)
     end
 
-    G.DoRestart = function(save, ...)
+    _G.DoRestart = function(save, ...)
         local context = active
         if context and context.armed then
             if context.phase ~= "exiting" then
@@ -168,7 +168,7 @@ AddSimPostInit(function()
         return old_restart(save, ...)
     end
 
-    G.LoadMapFile = function(map_name, ...)
+    _G.LoadMapFile = function(map_name, ...)
         local context = active
         if context and context.armed then
             if context.phase ~= "connecting" then
@@ -181,10 +181,10 @@ AddSimPostInit(function()
         return old_load_map(map_name, ...)
     end
 
-    G.SimReset = function(params, ...)
+    _G.SimReset = function(params, ...)
         local context = active
         if context and context.in_migrate and not context.armed and params
-            and params.reset_action == G.RESET_ACTION.JOIN_SERVER then
+            and params.reset_action == _G.RESET_ACTION.JOIN_SERVER then
             PrepareConnection(context, params)
             return
         end
@@ -205,9 +205,9 @@ AddSimPostInit(function()
         return ...
     end
 
-    G.MigrateToServer = function(server_ip, server_port, server_password, server_net_id, ...)
+    _G.MigrateToServer = function(server_ip, server_port, server_password, server_net_id, ...)
         if active then
-            if active.armed and active.phase == "connecting" and not active.in_migrate and not G.SimTearingDown then
+            if active.armed and active.phase == "connecting" and not active.in_migrate and not _G.SimTearingDown then
                 -- 回档重连时，主世界可能在下发地图前再次将玩家转回洞穴
                 active.phase = "redirecting"
                 Log("redirect_via_original_migration", active)
@@ -216,17 +216,17 @@ AddSimPostInit(function()
             Log("ignore_duplicate_migration", active)
             return
         end
-        local world = G.TheWorld
-        if not world or world.ismastersim or G.TheNet:GetIsServer() or not G.InGamePlay()
-            or G.SimTearingDown or not G.TheFrontEnd then
+        local world = _G.TheWorld
+        if not world or world.ismastersim or _G.TheNet:GetIsServer() or not _G.InGamePlay()
+            or _G.SimTearingDown or not _G.TheFrontEnd then
             return old_migrate(server_ip, server_port, server_password, server_net_id, ...)
         end
 
         local context = {
             world = world,
-            player = G.ThePlayer,
+            player = _G.ThePlayer,
             phase = "preparing",
-            begin_time = G.GetTimeRealSeconds(),
+            begin_time = _G.GetTimeRealSeconds(),
             in_migrate = true,
         }
         active = context

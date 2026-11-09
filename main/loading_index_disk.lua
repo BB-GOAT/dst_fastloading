@@ -1,8 +1,8 @@
--- Windows 宽字符文件接口；只枚举文件名，不加载或执行被枚举的脚本。
--- 保护调用仅用于释放枚举句柄，清理后重新抛出异常。
-return function(G, options)
+-- Windows 宽字符文件接口；只枚举文件名，不加载或执行被枚举的脚本
+-- 保护调用仅用于释放枚举句柄，清理后重新抛出异常
+return function(options)
     options = options or {}
-    local ffi = G.require("ffi")
+    local ffi = _G.require("ffi")
     local declarations = {
         [[typedef struct { uint32_t attr; uint32_t times[6]; uint32_t sizehigh, sizelow, reserved[2]; uint16_t name[260]; uint16_t alternate[14]; } DST_LOADING_INDEX_FIND_DATA_V1;]],
         "int __stdcall MultiByteToWideChar(unsigned int, uint32_t, const char *, int, void *, int);",
@@ -15,12 +15,12 @@ return function(G, options)
         "int __stdcall FindClose(void *);",
         "uint32_t __stdcall GetLastError(void);",
     }
-    if not G.rawget(G, "DST_LOADING_INDEX_FFI_DECLARED") then
+    if not _G.rawget(_G, "DST_LOADING_INDEX_FFI_DECLARED") then
         for _, declaration in ipairs(declarations) do ffi.cdef(declaration) end
-        G.rawset(G, "DST_LOADING_INDEX_FFI_DECLARED", true)
+        _G.rawset(_G, "DST_LOADING_INDEX_FFI_DECLARED", true)
     end
     local K = ffi.load("kernel32")
-    local bit = G.require("bit")
+    local bit = _G.require("bit")
     local INVALID = ffi.cast("void *", -1)
     local api = {}
     local function wide(text)
@@ -49,7 +49,7 @@ return function(G, options)
         return utf8(buffer, n):gsub("\\", "/"):gsub("/+$", "")
     end
     local function nativepath(path)
-        -- 内部已规范化的盘符绝对路径无需再次分配完整路径缓冲区。
+        -- 内部已规范化的盘符绝对路径无需再次分配完整路径缓冲区
         local full = path
         if not path:match("^%a:/") or path:find("\\", 1, true)
             or path:find("/.", 1, true) or path:find("//", 1, true) then
@@ -83,7 +83,7 @@ return function(G, options)
     end
     game_root = api:FullPath(game_root)
 
-    -- 优先实际 mods 目录，其次 Steam 工坊目录；一个清单对应一个明确的物理根。
+    -- 优先实际 mods 目录，其次 Steam 工坊目录；一个清单对应一个明确的物理根
     function api:Roots(name, logicalroot)
         local id = name:match("^workshop%-(%d+)$")
         local candidates = {
@@ -94,7 +94,7 @@ return function(G, options)
             candidates[#candidates + 1] = game_root .. "/../../workshop/content/322330/" .. id
             candidates[#candidates + 1] = game_root .. "/../../workshop/content/322330/" .. name
         end
-        local injector = G.rawget(G, "GameInjector")
+        local injector = _G.rawget(_G, "GameInjector")
         if id and injector and type(injector.DS_LUAJIT_get_workshop_dir) == "function" then
             local root = injector.DS_LUAJIT_get_workshop_dir()
             if type(root) == "string" and root ~= "" then
@@ -111,7 +111,7 @@ return function(G, options)
                 if directory then
                     if bit.band(attributes(full), 1024) ~= 0 then return nil, "reparse_root" end
                     local info = attributes(full .. "/modinfo.lua")
-                    -- 当前实现仅覆盖散装工坊目录；含游戏数据包的目录留给原版。
+                    -- 当前实现仅覆盖散装工坊目录；含游戏数据包的目录留给原版
                     if attributes(full .. "/databundles") then return nil, "packed_root" end
                     if info and bit.band(info, 16) == 0 then return { full } end
                 elseif code and code ~= 2 and code ~= 3 then
@@ -139,7 +139,7 @@ return function(G, options)
             local ok, result, reason = pcall(function()
                 while true do
                     local name = utf8(data[0].name)
-                    -- 点开头的文件不收录，目录不进入，包括 .git、.github 等。
+                    -- 点开头的文件不收录，目录不进入，包括 .git、.github 等
                     if name:sub(1, 1) ~= "." then
                         visited = visited + 1
                         if visited > 500000 then return false, "file_limit" end
@@ -169,13 +169,13 @@ return function(G, options)
         end
         return files
     end
-    -- 原版 io 将 unsafedata 映射到玩家存档目录，与模组安装位置无关。
+    -- 原版 io 将 unsafedata 映射到玩家存档目录，与模组安装位置无关
     local function cachepath(name)
         assert(name == "index", "invalid cache name")
         return "unsafedata/dst_fastloading_file_index.json"
     end
     function api:Read(name)
-        local file = G.io.open(cachepath(name), "r")
+        local file = _G.io.open(cachepath(name), "r")
         if not file then return nil end
         local text = file:read(67108865)
         local closed = file:close()
@@ -183,7 +183,7 @@ return function(G, options)
         return text
     end
     function api:Write(name, text)
-        local file, reason = G.io.open(cachepath(name), "w")
+        local file, reason = _G.io.open(cachepath(name), "w")
         if not file then return false, reason end
         local written, write_error = file:write(text)
         local closed, close_error = file:close()

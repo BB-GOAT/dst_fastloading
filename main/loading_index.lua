@@ -1,5 +1,5 @@
--- 优先按索引定位；无可用模组文件时直接尝试本体，仍无结果才完整调用原版搜索。
-return function(G, options, supplied_disk, supplied_json)
+-- 优先按索引定位；无可用模组文件时直接尝试本体，仍无结果才完整调用原版搜索
+return function(options, supplied_disk, supplied_json)
     local state = {
         enabled = options.enabled, active = false, restored = false, reason = "not_installed",
     }
@@ -7,7 +7,7 @@ return function(G, options, supplied_disk, supplied_json)
     local hooks, upvalues, entries, providers, roots_by_path = {}, {}, {}, {}, {}
     local script_plan, asset_plan
     local empty_candidates = {}
-    local native_exists = G.kleifileexists
+    local native_exists = _G.kleifileexists
     local function normalize(value) return value:gsub("\\", "/"):lower():gsub("/+$", "") end
     local function dotpath(value)
         return value:sub(1, 1) == "." or value:find("/.", 1, true)
@@ -22,15 +22,15 @@ return function(G, options, supplied_disk, supplied_json)
     local function hook(target, name, factory)
         local previous = target[name]
         if type(previous) ~= "function" then return false end
-        local own = G.rawget(target, name)
+        local own = _G.rawget(target, name)
         local replacement = factory(previous)
         hooks[#hooks + 1] = { target = target, name = name, previous = own, replacement = replacement }
         target[name] = replacement
         return true
     end
-    -- 只为已知原版入口提供快捷搜索，其他模组的包装器保留完整调用链。
+    -- 只为已知原版入口提供快捷搜索，其他模组的包装器保留完整调用链
     local function vanilla_loader(fn, upvalue)
-        local debug = G.debug
+        local debug = _G.debug
         if type(fn) ~= "function" or not debug or not debug.getinfo or not debug.getupvalue then return false end
         local info = debug.getinfo(fn, "S")
         local source = info and info.source:gsub("\\", "/"):gsub("^@", "")
@@ -54,27 +54,27 @@ return function(G, options, supplied_disk, supplied_json)
         list[#list + 1] = { entry = entry, relative = relative }
     end
     local function prepare()
-        disk = supplied_disk or options.disk_factory(G)
-        json = supplied_json or G.require("json")
+        disk = supplied_disk or options.disk_factory()
+        json = supplied_json or _G.require("json")
         local cache = { schema = 3, mods = {} }
         local dirty = true
         if not options.rebuild then
             local text = disk:Read("index")
             if text then
-                local ok, value = G.pcall(json.decode, text)
+                local ok, value = _G.pcall(json.decode, text)
                 if ok and type(value) == "table" and value.schema == 3 and type(value.mods) == "table" then
                     cache, dirty = value, false
                 else
-                    G.print("[快速加载] 文件清单损坏或格式已更新，重新扫描。")
+                    _G.print("[快速加载] 文件清单损坏或格式已更新，重新扫描")
                 end
             end
         end
         local function prepare_mod(name, mod)
             local version = mod.modinfo and mod.modinfo.version
-            -- 无版本的本地目录每轮重新枚举，不把未知版本长期缓存。
+            -- 无版本的本地目录每轮重新枚举，不把未知版本长期缓存
             local reusable = type(version) == "string" and version ~= ""
             if not reusable then version = "" end
-            local roots, why = disk:Roots(name, G.MODS_ROOT .. name .. "/")
+            local roots, why = disk:Roots(name, _G.MODS_ROOT .. name .. "/")
             if not roots then return false, why end
             local root = roots[1]
             local stored = cache.mods[name]
@@ -96,34 +96,34 @@ return function(G, options, supplied_disk, supplied_json)
             end
             local entry = { name = name, root = root, files = {} }
             entries[name] = entry
-            roots_by_path[normalize(G.MODS_ROOT .. name)] = entry
-            roots_by_path[normalize(disk:FullPath(G.MODS_ROOT .. name))] = entry
+            roots_by_path[normalize(_G.MODS_ROOT .. name)] = entry
+            roots_by_path[normalize(disk:FullPath(_G.MODS_ROOT .. name))] = entry
             roots_by_path[normalize(root)] = entry
             for _, relative in ipairs(list) do index_file(entry, relative) end
             return true
         end
         local seen = {}
-        for _, mod in ipairs(G.ModManager.mods) do
+        for _, mod in ipairs(_G.ModManager.mods) do
             local name = mod.modname
             local workshop = type(name) == "string" and name:match("^workshop%-%d+$")
             if type(name) == "string" and not seen[name] and (workshop or options.local_mods) then
                 seen[name] = true
                 local success, reason = prepare_mod(name, mod)
                 if not success then
-                    G.print("[快速加载] 模组 " .. name .. " 保留原版搜索：" .. tostring(reason))
+                    _G.print("[快速加载] 模组 " .. name .. " 保留原版搜索：" .. tostring(reason))
                 end
             end
         end
         if dirty then
             local success, reason = disk:Write("index", json.encode(cache))
             if not success then
-                G.print("[快速加载] 无法保存文件清单，继续使用当轮内存索引：" .. tostring(reason))
+                _G.print("[快速加载] 无法保存文件清单，继续使用当轮内存索引：" .. tostring(reason))
             end
         end
     end
 
     local function script_paths()
-        local path = G.package.path
+        local path = _G.package.path
         if script_plan and script_plan.source == path then return script_plan end
         local plan = { source = path, ranks = {}, indexed = {}, unknown = {} }
         local rank = 0
@@ -131,10 +131,10 @@ return function(G, options, supplied_disk, supplied_json)
             rank = rank + 1
             local root = normalize(template):match("^(.*)/scripts/%?%.lua$")
             local entry = root and roots_by_path[root]
-            local manifest, matches = template:gsub(G.MODS_ROOT .. "([^\\]+)\\scripts\\%?%.lua", "%1", 1)
+            local manifest, matches = template:gsub(_G.MODS_ROOT .. "([^\\]+)\\scripts\\%?%.lua", "%1", 1)
             local row = { rank = rank, template = template, manifest = matches == 1 and manifest or nil }
             if entry then
-                -- 重复条目只保留最早位置，其内容和物理根相同。
+                -- 重复条目只保留最早位置，其内容和物理根相同
                 if not plan.ranks[entry] then plan.ranks[entry], plan.indexed[entry] = rank, row end
             else
                 plan.unknown[#plan.unknown + 1] = row
@@ -145,10 +145,10 @@ return function(G, options, supplied_disk, supplied_json)
         return plan
     end
     local function asset_paths()
-        local paths = G.package.assetpath
+        local paths = _G.package.assetpath
         if asset_plan and asset_plan.source == paths and asset_plan.length == #paths then
             local unchanged = true
-            -- 验证当前路径表，处理同长度替换、原地重排和字段修改。
+            -- 验证当前路径表，处理同长度替换、原地重排和字段修改
             for i, row in ipairs(paths) do
                 if asset_plan.rows[i] ~= row or asset_plan.paths[i] ~= row.path or asset_plan.manifests[i] ~= row.manifest then
                     unchanged = false; break
@@ -188,18 +188,18 @@ return function(G, options, supplied_disk, supplied_json)
         return selected
     end
     local function logical_resource(entry, relative)
-        -- 磁盘路径仅供本模组的 Win32 接口使用；引擎和沙箱 io 使用模组逻辑路径。
-        return G.MODS_ROOT:gsub("\\", "/") .. entry.name .. "/" .. relative
+        -- 磁盘路径仅供本模组的 Win32 接口使用；引擎和沙箱 io 使用模组逻辑路径
+        return _G.MODS_ROOT:gsub("\\", "/") .. entry.name .. "/" .. relative
     end
     local function resolved_resource(filepath)
         local full = filepath:gsub("\\", "/")
-        local base = G.MODS_ROOT:gsub("\\", "/")
+        local base = _G.MODS_ROOT:gsub("\\", "/")
         local entry, relative
         if full:sub(1, #base):lower() == base:lower() then
             local name, rest = full:sub(#base + 1):match("^([^/]+)/(.*)$")
             entry, relative = entries[name], rest
         elseif full:match("^%a:/") or full:sub(1, 1) == "/" then
-            -- 兼容本轮已有调用方再次传入的已解析绝对路径。
+            -- 兼容本轮已有调用方再次传入的已解析绝对路径
             local lower = full:lower()
             for _, candidate in pairs(entries) do
                 local prefix = normalize(candidate.root) .. "/"
@@ -219,10 +219,10 @@ return function(G, options, supplied_disk, supplied_json)
         local template = row.template
         local filename = template:gsub("%?", relative):gsub("\\", "/")
 
-        -- 每次取当前入口，让本模组加载前后安装的 kleiloadlua 包装都能执行。
-        local result = G.kleiloadlua(filename, row.manifest, "scripts/" .. relative .. ".lua")
+        -- 每次取当前入口，让本模组加载前后安装的 kleiloadlua 包装都能执行
+        local result = _G.kleiloadlua(filename, row.manifest, "scripts/" .. relative .. ".lua")
         if result then
-            if G.RequiredFilesForReload then G.RequiredFilesForReload[filename] = G.TheSim:GetFileModificationTime(filename) end
+            if _G.RequiredFilesForReload then _G.RequiredFilesForReload[filename] = _G.TheSim:GetFileModificationTime(filename) end
             return result
         end
     end
@@ -252,8 +252,8 @@ return function(G, options, supplied_disk, supplied_json)
             if result then return result end
             item.entry.files[key] = nil
         end
-        -- 不把“模组无此文件”直接送回全量搜索；跳过已索引模组的无效路径，原生尝试本体。
-        -- 未索引路径仍按当前位置探测，避免本体越过本地模组或自定义搜索器。
+        -- 不把“模组无此文件”直接送回全量搜索；跳过已索引模组的无效路径，原生尝试本体
+        -- 未索引路径仍按当前位置探测，避免本体越过本地模组或自定义搜索器
         while plan.unknown[unknown] do
             local result = try_script_path(plan.unknown[unknown], relative)
             if result then return result end
@@ -263,11 +263,11 @@ return function(G, options, supplied_disk, supplied_json)
     end
     local function resolve_index(filepath, force, first)
         if type(filepath) ~= "string" then return nil end
-        if type(G.IsConsole) == "function" and G.IsConsole() and not force then return nil end
+        if type(_G.IsConsole) == "function" and _G.IsConsole() and not force then return nil end
         local relative = filepath:gsub("^/", "")
-        -- 与原版一致，显式优先路径必须早于已解析路径快捷分支。
+        -- 与原版一致，显式优先路径必须早于已解析路径快捷分支
         if first and native_exists(first .. relative) then return first .. relative end
-        -- Assets、翻译文件等会把上次解析的路径再次交给解析器；保持结果可重复解析。
+        -- Assets、翻译文件等会把上次解析的路径再次交给解析器；保持结果可重复解析
         local resolved = resolved_resource(filepath)
         if resolved then return resolved end
         local key = keypath(relative)
@@ -295,10 +295,10 @@ return function(G, options, supplied_disk, supplied_json)
         end
         return nil
     end
-    -- 外层包装不能替换三个入口共享的局部搜索器，且会破坏原 memoizedFilePaths。
-    -- 只寻找 util.lua 中名为 softresolvefilepath_internal 的已知共享引用；找不到就不改资源逻辑。
+    -- 外层包装不能替换三个入口共享的局部搜索器，且会破坏原 memoizedFilePaths
+    -- 只寻找 util.lua 中名为 softresolvefilepath_internal 的已知共享引用；找不到就不改资源逻辑
     local function hook_resources()
-        local debug = G.debug
+        local debug = _G.debug
         if not debug or not debug.getupvalue or not debug.setupvalue then return false end
         local visited, slots, count = {}, {}, 0
         local function visit(fn, depth)
@@ -316,9 +316,9 @@ return function(G, options, supplied_disk, supplied_json)
                 elseif type(value) == "function" then visit(value, depth + 1) end
             end
         end
-        visit(G.resolvefilepath, 0)
-        visit(G.resolvefilepath_soft, 0)
-        visit(G.softresolvefilepath, 0)
+        visit(_G.resolvefilepath, 0)
+        visit(_G.resolvefilepath_soft, 0)
+        visit(_G.softresolvefilepath, 0)
         if #slots < 2 then return false end
         local shared = slots[1].previous
         for _, slot in ipairs(slots) do if slot.previous ~= shared then return false end end
@@ -338,11 +338,11 @@ return function(G, options, supplied_disk, supplied_json)
     function state:Install()
         if self.active or self.restored then return end
         if not self.enabled then self.reason = "disabled"; return end
-        if G.ModManager.worldgen or (G.TheNet and G.TheNet:IsDedicated()) then self.reason = "unsupported_context"; return end
+        if _G.ModManager.worldgen or (_G.TheNet and _G.TheNet:IsDedicated()) then self.reason = "unsupported_context"; return end
         prepare()
         self.active, self.reason = true, "installed"
-        if vanilla_loader(G.package.loaders[2], "manifest_paths") then
-            hook(G.package.loaders, 2, function(previous)
+        if vanilla_loader(_G.package.loaders[2], "manifest_paths") then
+            hook(_G.package.loaders, 2, function(previous)
                 return function(module, ...)
                     if not state.active or type(module) ~= "string" or select("#", ...) > 0 then return previous(module, ...) end
                     local result = search_script(module)
@@ -351,11 +351,11 @@ return function(G, options, supplied_disk, supplied_json)
                 end
             end)
         end
-        if vanilla_loader(G.loadfile, "loadfn") then
-            hook(G, "loadfile", function(previous)
+        if vanilla_loader(_G.loadfile, "loadfn") then
+            hook(_G, "loadfile", function(previous)
                 return function(filename, ...)
                     if not state.active or type(filename) ~= "string" or select("#", ...) > 0 then return previous(filename, ...) end
-                    -- 与当前 main.lua 的 loadfile 名称转换保持一致。
+                    -- 与当前 main.lua 的 loadfile 名称转换保持一致
                     local module = filename:gsub(".lua", ""):gsub("scripts/", "")
                     local result = search_script(module)
                     if result then return result end
@@ -364,14 +364,14 @@ return function(G, options, supplied_disk, supplied_json)
             end)
         end
         self.resource_hook = hook_resources()
-        hook(G.ModManager, "InitializeModMain", function(previous)
+        hook(_G.ModManager, "InitializeModMain", function(previous)
             local function done(...) asset_plan = nil; return ... end
             return function(...)
                 asset_plan = nil
                 return done(previous(...))
             end
         end)
-        hook(G, "TranslateStringTable", function(previous)
+        hook(_G, "TranslateStringTable", function(previous)
             return function(...) asset_plan = nil; return previous(...) end
         end)
     end
@@ -380,21 +380,21 @@ return function(G, options, supplied_disk, supplied_json)
         self.active, self.restored = false, true
         local restore_error
         local function restore_upvalue(item)
-            local _, current = G.debug.getupvalue(item.fn, item.index)
-            if current == item.replacement then G.debug.setupvalue(item.fn, item.index, item.previous) end
+            local _, current = _G.debug.getupvalue(item.fn, item.index)
+            if current == item.replacement then _G.debug.setupvalue(item.fn, item.index, item.previous) end
         end
         for i = #upvalues, 1, -1 do
-            -- 内部引用恢复失败时，仍继续恢复公开入口；残留闭包已停用。
-            local ok, reason = G.pcall(restore_upvalue, upvalues[i])
+            -- 内部引用恢复失败时，仍继续恢复公开入口；残留闭包已停用
+            local ok, reason = _G.pcall(restore_upvalue, upvalues[i])
             if not ok and not restore_error then restore_error = reason end
         end
         for i = #hooks, 1, -1 do
             local item = hooks[i]
-            if G.rawget(item.target, item.name) == item.replacement then item.target[item.name] = item.previous end
+            if _G.rawget(item.target, item.name) == item.replacement then item.target[item.name] = item.previous end
         end
         hooks, upvalues, entries, providers, roots_by_path = {}, {}, {}, {}, {}
         script_plan, asset_plan = nil, nil
-        if restore_error then G.error(restore_error, 0) end
+        if restore_error then _G.error(restore_error, 0) end
     end
     return state
 end

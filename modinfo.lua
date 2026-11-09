@@ -1,12 +1,12 @@
 ---@diagnostic disable: lowercase-global
 name = "快速加载"
-version = "1.1.1"
+version = "1.2"
 author = "冰冰羊"
 description = [[
 提前建立资源/脚本文件磁盘索引，使游戏获取文件时直接从索引找到对应目标以提升加载速度
 开的模组越多加快越明显
-文件索引功能需要 Windows LuaJIT
-快速穿越世界可减少进出洞穴等跨世界切换时的等待，无需 LuaJIT
+文件搜索索引需要 Windows LuaJIT 才能工作
+其它功能无需 LuaJIT
 ]]
 api_version = 10
 priority = 1e50
@@ -26,19 +26,9 @@ server_only_mod = false
 
 configuration_options = {
     {
-        name = "fast_migration",
-        label = "快速穿越世界",
-        hover = "减少跨世界的等待时间，原版会重建一次LUA虚拟机才连接目标世界，本功能将跳过该步骤",
-        options = {
-            { description = "开启", data = true },
-            { description = "关闭", data = false },
-        },
-        default = true,
-    },
-    {
         name = "file_index_enabled",
         label = "文件搜索索引",
-        hover = "通过文件索引加速模组和游戏本体的脚本、资源搜索",
+        hover = "需要 Windows LuaJIT，通过文件索引加速模组和游戏本体的脚本、资源搜索",
         options = {
             { description = "开启", data = true },
             { description = "关闭", data = false },
@@ -66,9 +56,28 @@ configuration_options = {
         default = false,
     },
     {
+        name = "",
+        label = "",
+        hover = "",
+        options = {
+            { description = "", data = "" },
+        },
+        default = "",
+    },
+    {
         name = "getmod_index",
         label = "GetMod名称索引",
-        hover = "独立于文件索引，只加速PostInit收集期间的模组查询",
+        hover = "加速PostInit收集期间的模组查询",
+        options = {
+            { description = "开启", data = true },
+            { description = "关闭", data = false },
+        },
+        default = true,
+    },
+    {
+        name = "fast_migration",
+        label = "快速穿越世界",
+        hover = "减少跨世界的等待时间，原版会重建一次LUA虚拟机才连接目标世界，本功能将跳过该步骤",
         options = {
             { description = "开启", data = true },
             { description = "关闭", data = false },
