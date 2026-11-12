@@ -1,6 +1,6 @@
 ---@diagnostic disable: lowercase-global
 name = "快速加载"
-version = "1.2"
+version = "1.2.1"
 author = "冰冰羊"
 description = [[
 提前建立资源/脚本文件磁盘索引，使游戏获取文件时直接从索引找到对应目标以提升加载速度
