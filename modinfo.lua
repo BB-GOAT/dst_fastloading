@@ -1,12 +1,10 @@
 ---@diagnostic disable: lowercase-global
 name = "快速加载"
-version = "1.2.1"
+version = "1.3.0"
 author = "冰冰羊"
 description = [[
-提前建立资源/脚本文件磁盘索引，使游戏获取文件时直接从索引找到对应目标以提升加载速度
-开的模组越多加快越明显
-文件搜索索引需要 Windows LuaJIT 才能工作
-其它功能无需 LuaJIT
+使用多种手段提升游戏加载速度
+(大部分功能)需要 Windows LuaJIT 才能工作
 ]]
 api_version = 10
 priority = 1e50
@@ -24,7 +22,17 @@ all_clients_require_mod = false
 client_only_mod = true
 server_only_mod = false
 
+restart_required = true -- 资源解压加速/资源初始化加速 功能需要关闭游戏才会被卸载
+
+---@param label string|nil 标题
+---@param client_config boolean|nil 是否仅显示在客户端设置页面上
+---@return table
+local function SkipSpace(label, client_config)
+    return { name = "",label = label, hover = "", options = { { description = "", data = false }, }, default = false, client = client_config}
+end
+
 configuration_options = {
+    SkipSpace("Luajit"),
     {
         name = "file_index_enabled",
         label = "文件搜索索引",
@@ -56,14 +64,26 @@ configuration_options = {
         default = false,
     },
     {
-        name = "",
-        label = "",
-        hover = "",
+        name = "native_zip",
+        label = "资源解压加速",
+        hover = "减少读取压缩游戏资源时的解压耗时；需要 Windows x64 LuaJIT，启停后须完整退出游戏",
         options = {
-            { description = "", data = "" },
+            { description = "开启", data = true },
+            { description = "关闭", data = false },
         },
-        default = "",
+        default = true,
     },
+    {
+        name = "native_fill",
+        label = "资源初始化加速",
+        hover = "加快资源加载时的内存准备，减少逐字节填充耗时；需要 Windows x64 LuaJIT，启停后须完整退出游戏",
+        options = {
+            { description = "开启", data = true },
+            { description = "关闭", data = false },
+        },
+        default = true,
+    },
+    SkipSpace(),
     {
         name = "getmod_index",
         label = "GetMod名称索引",

@@ -6,11 +6,6 @@ if GetModConfigData("fast_migration") then
     modimport("main/migration_runtime.lua")
 end
 
--- 启动期索引：分别判断 GetMod 名称索引和文件搜索索引的运行条件
-local getmod_enabled = GetModConfigData("getmod_index") == true
-local file_enabled = GetModConfigData("file_index_enabled") == true
-if not getmod_enabled and not file_enabled then return end
-
 -- 工厂模块在游戏全局环境中执行，不依赖 modimport 的返回值
 local function Import(path)
     local chunk = _G.kleiloadlua(MODROOT .. path)
@@ -21,15 +16,36 @@ local function Import(path)
     return chunk()
 end
 
+-- 原生加载优化独立于两种索引；不满足平台条件时只跳过原生部分。
+local native_flags = (GetModConfigData("native_zip") and 1 or 0)
+    + (GetModConfigData("native_fill") and 2 or 0)
+if native_flags > 0 then
+    if jit and jit.os == "Windows" and jit.arch == "x64" then
+        local ffi = _G.require("ffi")
+        local disk = Import("main/loading_index_disk.lua")()
+        local result = Import("main/native_loading.lua")({
+            ffi = ffi, disk = disk, root = MODROOT, name = modname, flags = native_flags,
+        })
+        _G.print("[快速加载][原生优化] 启用结果：" .. _G.tostring(result)
+            .. "；位 1=整块解压，位 2=内存填充；详见 native/fastloading_native.log")
+    else
+        _G.print("[快速加载][原生优化] 需要 Windows x64 LuaJIT，已跳过原生优化")
+    end
+end
+
+-- 启动期索引：分别判断 GetMod 名称索引和文件搜索索引的运行条件
+local getmod_enabled = GetModConfigData("getmod_index") == true
+local file_enabled = GetModConfigData("file_index_enabled") == true
+if not getmod_enabled and not file_enabled then return end
+
 local getmod, index
 if getmod_enabled then
     getmod = Import("main/loading_index_getmod.lua")
 end
 
--- 只有文件搜索索引需要 FFI；探测失败不影响 GetMod 名称索引
+-- 只有文件搜索索引需要 FFI；普通 Lua 和非 Windows 环境直接跳过
 if file_enabled then
-    local ffi_ok, ffi = _G.pcall(_G.require, "ffi")
-    if ffi_ok and ffi and ffi.os == "Windows" then
+    if jit and jit.os == "Windows" then
         index = Import("main/loading_index.lua")({
             enabled = true,
             local_mods = GetModConfigData("index_local_mods") == true,
@@ -47,21 +63,14 @@ local own_end = _G.rawget(_G.KnownModIndex, "EndStartupSequence")
 local replacement
 local stopped = false
 
-local function restore(state, label)
-    if not state then return end
-    local ok, reason = _G.pcall(state.Restore, state)
-    if not ok then _G.print("[快速加载] " .. label .. "恢复失败：" .. _G.tostring(reason)) end
-end
-
 local function stop()
     if stopped then return end
     stopped = true
-    -- 分别清理，避免一组恢复失败阻止另一组恢复
-    restore(index, "文件索引")
-    restore(getmod, "GetMod 索引")
     if _G.KnownModIndex.EndStartupSequence == replacement then
         _G.KnownModIndex.EndStartupSequence = own_end
     end
+    if index then index:Restore() end
+    if getmod then getmod:Restore() end
 end
 
 local function done(ok, ...)
@@ -69,7 +78,13 @@ local function done(ok, ...)
     if not ok then _G.error((...), 0) end
     return ...
 end
-replacement = function(...) return done(_G.pcall(old_end, ...)) end
+-- 保护调用仅用于出错后撤销临时索引；保留原始堆栈并重新抛出错误
+replacement = function(...)
+    local args, count = { ... }, _G.select("#", ...)
+    return done(_G.xpcall(function()
+        return old_end(_G.unpack(args, 1, count))
+    end, _G.debug.traceback))
+end
 
 local function install()
     _G.KnownModIndex.EndStartupSequence = replacement
@@ -89,7 +104,7 @@ local function install()
     end
 end
 
-local ok, reason = _G.pcall(install)
+local ok, reason = _G.xpcall(install, _G.debug.traceback)
 if not ok then
     stop()
     _G.error(reason, 0)
